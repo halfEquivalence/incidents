@@ -1,5 +1,14 @@
 const Incident = require("../models/incident.model");
+const Narrative = require("../models/narrative.model");
+const Comment = require("../models/comment.model");
 const helpers = require("./helpers");
+
+const getIncidentFromReq = async req => {
+  const recordNumber = req.params.id;
+  const incident = await Incident.findOne({ recordNumber });
+  if (!incident) return res.redirect("/not-found");
+  return incident;
+}
 
 /*
 "Create Incident" Page: 
@@ -32,23 +41,14 @@ const createIncident = async (req, res) => {
   - If not, redirect to /not-found
 */
 const displayUpdateIncidentPage = async (req, res) => {
-  const incidentId = req.params.id;
-  const incident = await Incident.findById(incidentId);
-  if (!incident) return res.redirect("/not-found");
+  const incident = await getIncidentFromReq(req);
+
+  if (incident.status === "Closed") {
+    return res.redirect(`/incidents/${incident.recordNumber}`);
+  }
 
   res.render("incidents/update", {
     title: "Update Incident",
-    incident,
-  });
-};
-
-const displayIncidentPage = async (req, res) => {
-  const incidentId = req.params.id;
-  const incident = await Incident.findById(incidentId);
-  if (!incident) return res.redirect("/not-found");
-
-  res.render("incidents/view", {
-    title: "View Incident",
     incident,
   });
 };
@@ -60,17 +60,27 @@ const displayIncidentPage = async (req, res) => {
   - If not, redirect to /not-found
 - Redirect to landing page
 */
-const updateIncident = (req, res) => {
-  const incidentId = req.params.id;
-  const formData = req.body;
+const updateIncident = async (req, res) => {
+  const { narrative, ...formData } = req.body;
 
-  Incident.updateOne({ _id: incidentId }, formData, (err) => {
-    if (err) {
-      res.end(err);
-    } else {
-      res.redirect("/");
-    }
+  const incident = await getIncidentFromReq(req);
+  const { recordNumber } = incident;
+
+  const changes = helpers.objectDiff(incident.toObject(), formData);
+  const isClosingIncident = changes.status && changes.status.next === "Closed";
+  
+  await Incident.updateOne({ recordNumber }, {
+    ...formData,
+    resolution: isClosingIncident ? narrative : null
   });
+  await Narrative.create({
+    narrative,
+    changes,
+    incident: incident._id,
+    author: req.user._id
+  });
+
+  res.redirect(`/incidents/${recordNumber}`);
 };
 
 /*
@@ -80,20 +90,40 @@ const updateIncident = (req, res) => {
   - If not, redirect to /not-found
 */
 const deleteIncident = async (req, res) => {
-  const incidentId = req.params.id;
-  const doesIncidentExist = await Incident.exists({ _id: incidentId });
+  const recordNumber = req.params.id;
+  const doesIncidentExist = await Incident.exists({ recordNumber });
 
   if (!doesIncidentExist) return res.redirect("/not-found");
 
-  await Incident.deleteOne({ _id: incidentId });
+  await Incident.deleteOne({ recordNumber });
   return res.redirect("/");
 };
+
+const displayIncidentPage = async (req, res) => {
+  const incident = await getIncidentFromReq(req);
+  const narratives = await Narrative.find({ incident: incident._id }).populate("author");
+  const comments = await Comment.find({ incident: incident._id }).populate("author");
+  
+  res.render("incidents/incident", { incident, narratives, comments });
+};
+
+const createComment = async (req, res) => {
+  const incident = await getIncidentFromReq(req);
+  await Comment.create({
+    comment: req.body.comment,
+    author: req.user._id,
+    incident: incident._id,
+  });
+
+  res.redirect(`/incidents/${incident.recordNumber}#comments`);
+}
 
 module.exports = {
   displayCreateIncidentPage,
   createIncident,
   displayUpdateIncidentPage,
-  displayIncidentPage,
   updateIncident,
   deleteIncident,
+  displayIncidentPage,
+  createComment
 };

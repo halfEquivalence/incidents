@@ -14,10 +14,10 @@ router
   .get(ensureLoggedIn, controller.displayUpdateIncidentPage)
   .post(ensureLoggedIn, controller.updateIncident);
 
-router
-  .route("/incidents/:id/view")
-  .get(ensureLoggedIn, controller.displayIncidentPage);
-
 router.get("/incidents/:id/delete", ensureLoggedIn, controller.deleteIncident);
+
+router.get("/incidents/:id", ensureLoggedIn, controller.displayIncidentPage);
+
+router.post("/incidents/:id/comments", ensureLoggedIn, controller.createComment);
 
 module.exports = router;
